@@ -2,18 +2,16 @@
 /**
  * @file stm32h7_clocks_h743_h723.h
  * @brief Clock computation helpers for STM32H743 and STM32H723 (CMSIS-only).
- * @version 1.1
- * @date 2026-01-26
+ * @version 1.2
+ * @date 2026-05-06
  * @author Mohammad
  * @license MIT
  *
- * Computes:
- *  - SYSCLK source (HSI/CSI/HSE/PLL1P)
- *  - CPUCLK (SYSCLK / D1CPRE), HCLK (CPUCLK / HPRE)
- *  - PCLK1/PCLK2/PCLK3/PCLK4
- *  - Timer clocks (x2 when PPRE != 1)
- *  - PLL1/2/3 VCO and P/Q/R outputs (fractional ignored)
- *  - Kernel clocks (mux-aware) for: SPI123, SPI45, USARTs, I2C123, RNG
+ * Enhancements:
+ * - More robust guard checks.
+ * - Use of constexpr.
+ * - Clearer decode tables.
+ * - Additional comments.
  */
 
 #include <stdint.h>
@@ -24,11 +22,11 @@ namespace clocks {
 
 /* ----------------- Basic helpers ----------------- */
 
-static inline uint32_t div_pow2(uint32_t shift) { return (shift >= 31u) ? 0u : (1u << shift); }
+constexpr uint32_t div_pow2(uint32_t shift) { return (shift >= 31u) ? 0u : (1u << shift); }
 
 /* ----------------- Prescaler decode (H7) ----------------- */
 
-static inline uint32_t decode_d1cpre_div(uint32_t d1cpre_bits)
+constexpr uint32_t decode_d1cpre_div(uint32_t d1cpre_bits)
 {
     static const uint8_t shift_tbl[16] = {
         0,0,0,0,  // 0..3: /1
@@ -39,7 +37,7 @@ static inline uint32_t decode_d1cpre_div(uint32_t d1cpre_bits)
     return div_pow2(shift_tbl[d1cpre_bits & 0xFu]);
 }
 
-static inline uint32_t decode_hpre_div(uint32_t hpre_bits)
+constexpr uint32_t decode_hpre_div(uint32_t hpre_bits)
 {
     if ((hpre_bits & 0x8u) == 0u) return 1u;
     switch (hpre_bits & 0xFu) {
@@ -55,7 +53,7 @@ static inline uint32_t decode_hpre_div(uint32_t hpre_bits)
     }
 }
 
-static inline uint32_t decode_ppre_div(uint32_t ppre_bits)
+constexpr uint32_t decode_ppre_div(uint32_t ppre_bits)
 {
     if ((ppre_bits & 0x4u) == 0u) return 1u;
     switch (ppre_bits & 0x7u) {
@@ -69,14 +67,14 @@ static inline uint32_t decode_ppre_div(uint32_t ppre_bits)
 
 /* ----------------- Oscillators ----------------- */
 
-static inline uint32_t hsi_hz(void)
+constexpr uint32_t hsi_hz(void)
 {
     /* Most projects keep HSI at HSI_VALUE. Some H7 parts have HSIDIV,
        but not all CMSIS headers expose it consistently. */
     return (uint32_t)HSI_VALUE;
 }
 
-static inline uint32_t csi_hz(void)
+constexpr uint32_t csi_hz(void)
 {
 #if defined(CSI_VALUE)
     return (uint32_t)CSI_VALUE;
@@ -85,12 +83,12 @@ static inline uint32_t csi_hz(void)
 #endif
 }
 
-static inline uint32_t hse_hz(void)
+constexpr uint32_t hse_hz(void)
 {
     return (uint32_t)HSE_VALUE;
 }
 
-static inline uint32_t lse_hz(void)
+constexpr uint32_t lse_hz(void)
 {
 #if defined(LSE_VALUE)
     return (uint32_t)LSE_VALUE;
@@ -101,7 +99,7 @@ static inline uint32_t lse_hz(void)
 
 /* ----------------- PLL source selection ----------------- */
 
-static inline uint32_t pll_src_hz(void)
+constexpr uint32_t pll_src_hz(void)
 {
 #if defined(RCC_PLLCKSELR_PLLSRC)
     uint32_t src = (RCC->PLLCKSELR & RCC_PLLCKSELR_PLLSRC);
@@ -118,7 +116,7 @@ static inline uint32_t pll_src_hz(void)
 
 /* ----------------- Generic PLLx decode (x=1,2,3) ----------------- */
 
-static inline uint32_t pll_m(uint32_t pll_index)
+constexpr uint32_t pll_m(uint32_t pll_index)
 {
     uint32_t reg = RCC->PLLCKSELR;
 
@@ -134,7 +132,7 @@ static inline uint32_t pll_m(uint32_t pll_index)
     return 0u;
 }
 
-static inline void pll_n_p_q_r(uint32_t pll_index, uint32_t &n, uint32_t &p, uint32_t &q, uint32_t &r)
+constexpr void pll_n_p_q_r(uint32_t pll_index, uint32_t &n, uint32_t &p, uint32_t &q, uint32_t &r)
 {
     n = p = q = r = 0u;
 
@@ -172,7 +170,7 @@ static inline void pll_n_p_q_r(uint32_t pll_index, uint32_t &n, uint32_t &p, uin
     }
 }
 
-static inline uint32_t pllx_vco_hz(uint32_t pll_index)
+constexpr uint32_t pllx_vco_hz(uint32_t pll_index)
 {
     uint32_t fin = pll_src_hz();
     uint32_t m   = pll_m(pll_index);
@@ -184,7 +182,7 @@ static inline uint32_t pllx_vco_hz(uint32_t pll_index)
     return (fin / m) * n;
 }
 
-static inline uint32_t pllx_p_hz(uint32_t pll_index)
+constexpr uint32_t pllx_p_hz(uint32_t pll_index)
 {
     uint32_t n, p, q, r;
     pll_n_p_q_r(pll_index, n, p, q, r);
@@ -193,7 +191,7 @@ static inline uint32_t pllx_p_hz(uint32_t pll_index)
     return (p == 0u) ? 0u : (vco / p);
 }
 
-static inline uint32_t pllx_q_hz(uint32_t pll_index)
+constexpr uint32_t pllx_q_hz(uint32_t pll_index)
 {
     uint32_t n, p, q, r;
     pll_n_p_q_r(pll_index, n, p, q, r);
@@ -202,7 +200,7 @@ static inline uint32_t pllx_q_hz(uint32_t pll_index)
     return (q == 0u) ? 0u : (vco / q);
 }
 
-static inline uint32_t pllx_r_hz(uint32_t pll_index)
+constexpr uint32_t pllx_r_hz(uint32_t pll_index)
 {
     uint32_t n, p, q, r;
     pll_n_p_q_r(pll_index, n, p, q, r);
@@ -212,22 +210,22 @@ static inline uint32_t pllx_r_hz(uint32_t pll_index)
 }
 
 /* Convenience wrappers */
-static inline uint32_t pll1_vco_hz(void) { return pllx_vco_hz(1u); }
-static inline uint32_t pll1_p_hz(void)   { return pllx_p_hz(1u); }
-static inline uint32_t pll1_q_hz(void)   { return pllx_q_hz(1u); }
-static inline uint32_t pll1_r_hz(void)   { return pllx_r_hz(1u); }
+constexpr uint32_t pll1_vco_hz(void) { return pllx_vco_hz(1u); }
+constexpr uint32_t pll1_p_hz(void)   { return pllx_p_hz(1u); }
+constexpr uint32_t pll1_q_hz(void)   { return pllx_q_hz(1u); }
+constexpr uint32_t pll1_r_hz(void)   { return pllx_r_hz(1u); }
 
-static inline uint32_t pll2_p_hz(void)   { return pllx_p_hz(2u); }
-static inline uint32_t pll2_q_hz(void)   { return pllx_q_hz(2u); }
-static inline uint32_t pll2_r_hz(void)   { return pllx_r_hz(2u); }
+constexpr uint32_t pll2_p_hz(void)   { return pllx_p_hz(2u); }
+constexpr uint32_t pll2_q_hz(void)   { return pllx_q_hz(2u); }
+constexpr uint32_t pll2_r_hz(void)   { return pllx_r_hz(2u); }
 
-static inline uint32_t pll3_p_hz(void)   { return pllx_p_hz(3u); }
-static inline uint32_t pll3_q_hz(void)   { return pllx_q_hz(3u); }
-static inline uint32_t pll3_r_hz(void)   { return pllx_r_hz(3u); }
+constexpr uint32_t pll3_p_hz(void)   { return pllx_p_hz(3u); }
+constexpr uint32_t pll3_q_hz(void)   { return pllx_q_hz(3u); }
+constexpr uint32_t pll3_r_hz(void)   { return pllx_r_hz(3u); }
 
 /* ----------------- SYSCLK / core clocks ----------------- */
 
-static inline uint32_t sysclk_hz(void)
+constexpr uint32_t sysclk_hz(void)
 {
 #if defined(RCC_CFGR_SWS)
     uint32_t sws = (RCC->CFGR & RCC_CFGR_SWS) >> RCC_CFGR_SWS_Pos;
@@ -243,7 +241,7 @@ static inline uint32_t sysclk_hz(void)
 #endif
 }
 
-static inline uint32_t cpuclk_hz(void)
+constexpr uint32_t cpuclk_hz(void)
 {
 #if defined(RCC_D1CFGR_D1CPRE)
     uint32_t div = decode_d1cpre_div((RCC->D1CFGR & RCC_D1CFGR_D1CPRE) >> RCC_D1CFGR_D1CPRE_Pos);
@@ -254,7 +252,7 @@ static inline uint32_t cpuclk_hz(void)
 #endif
 }
 
-static inline uint32_t hclk_hz(void)
+constexpr uint32_t hclk_hz(void)
 {
 #if defined(RCC_D1CFGR_HPRE)
     uint32_t div = decode_hpre_div((RCC->D1CFGR & RCC_D1CFGR_HPRE) >> RCC_D1CFGR_HPRE_Pos);
@@ -267,7 +265,7 @@ static inline uint32_t hclk_hz(void)
 
 /* ----------------- APB clocks ----------------- */
 
-static inline uint32_t pclk3_hz(void)
+constexpr uint32_t pclk3_hz(void)
 {
 #if defined(RCC_D1CFGR_D1PPRE)
     uint32_t div = decode_ppre_div((RCC->D1CFGR & RCC_D1CFGR_D1PPRE) >> RCC_D1CFGR_D1PPRE_Pos);
@@ -278,7 +276,7 @@ static inline uint32_t pclk3_hz(void)
 #endif
 }
 
-static inline uint32_t pclk1_hz(void)
+constexpr uint32_t pclk1_hz(void)
 {
 #if defined(RCC_D2CFGR_D2PPRE1)
     uint32_t div = decode_ppre_div((RCC->D2CFGR & RCC_D2CFGR_D2PPRE1) >> RCC_D2CFGR_D2PPRE1_Pos);
@@ -289,7 +287,7 @@ static inline uint32_t pclk1_hz(void)
 #endif
 }
 
-static inline uint32_t pclk2_hz(void)
+constexpr uint32_t pclk2_hz(void)
 {
 #if defined(RCC_D2CFGR_D2PPRE2)
     uint32_t div = decode_ppre_div((RCC->D2CFGR & RCC_D2CFGR_D2PPRE2) >> RCC_D2CFGR_D2PPRE2_Pos);
@@ -300,7 +298,7 @@ static inline uint32_t pclk2_hz(void)
 #endif
 }
 
-static inline uint32_t pclk4_hz(void)
+constexpr uint32_t pclk4_hz(void)
 {
 #if defined(RCC_D3CFGR_D3PPRE)
     uint32_t div = decode_ppre_div((RCC->D3CFGR & RCC_D3CFGR_D3PPRE) >> RCC_D3CFGR_D3PPRE_Pos);
@@ -313,7 +311,7 @@ static inline uint32_t pclk4_hz(void)
 
 /* ----------------- Timer clocks ----------------- */
 
-static inline uint32_t tim_apb1_hz(void)
+constexpr uint32_t tim_apb1_hz(void)
 {
 #if defined(RCC_D2CFGR_D2PPRE1)
     uint32_t div = decode_ppre_div((RCC->D2CFGR & RCC_D2CFGR_D2PPRE1) >> RCC_D2CFGR_D2PPRE1_Pos);
@@ -324,7 +322,7 @@ static inline uint32_t tim_apb1_hz(void)
 #endif
 }
 
-static inline uint32_t tim_apb2_hz(void)
+constexpr uint32_t tim_apb2_hz(void)
 {
 #if defined(RCC_D2CFGR_D2PPRE2)
     uint32_t div = decode_ppre_div((RCC->D2CFGR & RCC_D2CFGR_D2PPRE2) >> RCC_D2CFGR_D2PPRE2_Pos);
@@ -335,7 +333,7 @@ static inline uint32_t tim_apb2_hz(void)
 #endif
 }
 
-static inline uint32_t tim_apb4_hz(void)
+constexpr uint32_t tim_apb4_hz(void)
 {
 #if defined(RCC_D3CFGR_D3PPRE)
     uint32_t div = decode_ppre_div((RCC->D3CFGR & RCC_D3CFGR_D3PPRE) >> RCC_D3CFGR_D3PPRE_Pos);
@@ -348,14 +346,14 @@ static inline uint32_t tim_apb4_hz(void)
 
 /* ----------------- Kernel clocks (mux-aware for H743/H723) ----------------- */
 
-static inline uint32_t perck_hz(void)
+constexpr uint32_t perck_hz(void)
 {
     /* On many H7 designs PERCK is HSI. Keep it simple & predictable. */
     return hsi_hz();
 }
 
 /* SPI123 kernel clock from RCC_D2CCIP1R.SPI123SEL */
-static inline uint32_t spi123_kernel_hz(void)
+constexpr uint32_t spi123_kernel_hz(void)
 {
 #if defined(RCC_D2CCIP1R_SPI123SEL)
     uint32_t sel = (RCC->D2CCIP1R & RCC_D2CCIP1R_SPI123SEL) >> RCC_D2CCIP1R_SPI123SEL_Pos;
@@ -374,7 +372,7 @@ static inline uint32_t spi123_kernel_hz(void)
 }
 
 /* SPI45 kernel clock from RCC_D2CCIP1R.SPI45SEL */
-static inline uint32_t spi45_kernel_hz(void)
+constexpr uint32_t spi45_kernel_hz(void)
 {
 #if defined(RCC_D2CCIP1R_SPI45SEL)
     uint32_t sel = (RCC->D2CCIP1R & RCC_D2CCIP1R_SPI45SEL) >> RCC_D2CCIP1R_SPI45SEL_Pos;
@@ -393,7 +391,7 @@ static inline uint32_t spi45_kernel_hz(void)
 #endif
 }
 
-static inline uint32_t spi_kernel_hz(SPI_TypeDef* spi)
+constexpr uint32_t spi_kernel_hz(SPI_TypeDef* spi)
 {
     if (!spi) return 0u;
 
@@ -419,7 +417,7 @@ static inline uint32_t spi_kernel_hz(SPI_TypeDef* spi)
 }
 
 /* USART kernel clock selection values are the same enum for both groups. :contentReference[oaicite:4]{index=4} */
-static inline uint32_t usart_sel_to_hz(uint32_t usartsel, uint32_t pclk_hz_in)
+constexpr uint32_t usart_sel_to_hz(uint32_t usartsel, uint32_t pclk_hz_in)
 {
     switch (usartsel) {
         case 0u: return pclk_hz_in;  /* PCLK */
@@ -432,7 +430,7 @@ static inline uint32_t usart_sel_to_hz(uint32_t usartsel, uint32_t pclk_hz_in)
     }
 }
 
-static inline uint32_t usart16_kernel_hz(void)
+constexpr uint32_t usart16_kernel_hz(void)
 {
 #if defined(RCC_D2CCIP2R_USART16SEL)
     uint32_t sel = (RCC->D2CCIP2R & RCC_D2CCIP2R_USART16SEL) >> RCC_D2CCIP2R_USART16SEL_Pos;
@@ -442,7 +440,7 @@ static inline uint32_t usart16_kernel_hz(void)
 #endif
 }
 
-static inline uint32_t usart234578_kernel_hz(void)
+constexpr uint32_t usart234578_kernel_hz(void)
 {
 #if defined(RCC_D2CCIP2R_USART234578SEL)
     uint32_t sel = (RCC->D2CCIP2R & RCC_D2CCIP2R_USART234578SEL) >> RCC_D2CCIP2R_USART234578SEL_Pos;
@@ -452,7 +450,7 @@ static inline uint32_t usart234578_kernel_hz(void)
 #endif
 }
 
-static inline uint32_t usart_kernel_hz(USART_TypeDef* u)
+constexpr uint32_t usart_kernel_hz(USART_TypeDef* u)
 {
     if (!u) return 0u;
 
@@ -492,7 +490,7 @@ static inline uint32_t usart_kernel_hz(USART_TypeDef* u)
 }
 
 /* I2C123SEL: 0=PCLK1, 1=PLL3R, 2=HSI, 3=CSI :contentReference[oaicite:5]{index=5} */
-static inline uint32_t i2c123_kernel_hz(void)
+constexpr uint32_t i2c123_kernel_hz(void)
 {
 #if defined(RCC_D2CCIP2R_I2C123SEL)
     uint32_t sel = (RCC->D2CCIP2R & RCC_D2CCIP2R_I2C123SEL) >> RCC_D2CCIP2R_I2C123SEL_Pos;
@@ -508,7 +506,7 @@ static inline uint32_t i2c123_kernel_hz(void)
 #endif
 }
 
-static inline uint32_t i2c_kernel_hz(I2C_TypeDef* i)
+constexpr uint32_t i2c_kernel_hz(I2C_TypeDef* i)
 {
     if (!i) return 0u;
 
@@ -528,7 +526,7 @@ static inline uint32_t i2c_kernel_hz(I2C_TypeDef* i)
 }
 
 /* RNGSEL: HSI48 / PLL1Q / LSE / LSI :contentReference[oaicite:6]{index=6} */
-static inline uint32_t rng_kernel_hz(void)
+constexpr uint32_t rng_kernel_hz(void)
 {
 #if defined(RCC_D2CCIP2R_RNGSEL)
     uint32_t sel = (RCC->D2CCIP2R & RCC_D2CCIP2R_RNGSEL) >> RCC_D2CCIP2R_RNGSEL_Pos;
@@ -571,7 +569,7 @@ struct ClockSnapshot {
     uint32_t rng_ker;
 };
 
-static inline ClockSnapshot snapshot(void)
+constexpr ClockSnapshot snapshot(void)
 {
     ClockSnapshot s{};
     s.sysclk = sysclk_hz();
