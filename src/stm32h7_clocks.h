@@ -336,9 +336,6 @@ static inline uint32_t pclk4_hz(void)
 
 /* ----------------- Timer clocks ----------------- */
 
-<<<<<<< Updated upstream
-static inline uint32_t tim_apb1_hz(void)
-=======
 static inline uint32_t timer_kernel_hz(uint32_t pclk, uint32_t apb_div)
 {
 #if defined(RCC_CFGR_TIMPRE)
@@ -349,7 +346,6 @@ static inline uint32_t timer_kernel_hz(uint32_t pclk, uint32_t apb_div)
 }
 
 static inline uint32_t tim_apb1_hz(void)
->>>>>>> Stashed changes
 {
 #if defined(RCC_D2CFGR_D2PPRE1)
     uint32_t div = decode_ppre_div((RCC->D2CFGR & RCC_D2CFGR_D2PPRE1) >> RCC_D2CFGR_D2PPRE1_Pos);
