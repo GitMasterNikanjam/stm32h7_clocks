@@ -69,9 +69,17 @@ constexpr uint32_t decode_ppre_div(uint32_t ppre_bits)
 
 constexpr uint32_t hsi_hz(void)
 {
-    /* Most projects keep HSI at HSI_VALUE. Some H7 parts have HSIDIV,
-       but not all CMSIS headers expose it consistently. */
-    return (uint32_t)HSI_VALUE;
+    uint32_t divider = 1u;
+#if defined(RCC_CR_HSIDIV) && defined(RCC_CR_HSIDIV_Pos)
+    /* H743: HSIDIV encoding is 0=/1, 1=/2, 2=/4, 3=/8. */
+    switch ((RCC->CR & RCC_CR_HSIDIV) >> RCC_CR_HSIDIV_Pos) {
+        case 1u: divider = 2u; break;
+        case 2u: divider = 4u; break;
+        case 3u: divider = 8u; break;
+        default: break;
+    }
+#endif
+    return ((uint32_t)HSI_VALUE / divider);
 }
 
 constexpr uint32_t csi_hz(void)
@@ -179,7 +187,24 @@ constexpr uint32_t pllx_vco_hz(uint32_t pll_index)
     (void)p; (void)q; (void)r;
 
     if (fin == 0u || m == 0u || n == 0u) return 0u;
-    return (fin / m) * n;
+
+    /* H7 PLLs have a 13-bit optional fractional N divider.  Use 64-bit
+       arithmetic so the intermediate product cannot overflow at H7 rates. */
+    uint32_t fracn = 0u;
+#if defined(RCC_PLLCFGR_PLL1FRACEN) && defined(RCC_PLL1FRACR_FRACN1)
+    if (pll_index == 1u && (RCC->PLLCFGR & RCC_PLLCFGR_PLL1FRACEN))
+        fracn = (RCC->PLL1FRACR & RCC_PLL1FRACR_FRACN1) >> RCC_PLL1FRACR_FRACN1_Pos;
+#endif
+#if defined(RCC_PLLCFGR_PLL2FRACEN) && defined(RCC_PLL2FRACR_FRACN2)
+    if (pll_index == 2u && (RCC->PLLCFGR & RCC_PLLCFGR_PLL2FRACEN))
+        fracn = (RCC->PLL2FRACR & RCC_PLL2FRACR_FRACN2) >> RCC_PLL2FRACR_FRACN2_Pos;
+#endif
+#if defined(RCC_PLLCFGR_PLL3FRACEN) && defined(RCC_PLL3FRACR_FRACN3)
+    if (pll_index == 3u && (RCC->PLLCFGR & RCC_PLLCFGR_PLL3FRACEN))
+        fracn = (RCC->PLL3FRACR & RCC_PLL3FRACR_FRACN3) >> RCC_PLL3FRACR_FRACN3_Pos;
+#endif
+    const uint64_t n_scaled = ((uint64_t)n * 8192u) + fracn;
+    return (uint32_t)(((uint64_t)fin * n_scaled) / ((uint64_t)m * 8192u));
 }
 
 constexpr uint32_t pllx_p_hz(uint32_t pll_index)
@@ -311,12 +336,24 @@ constexpr uint32_t pclk4_hz(void)
 
 /* ----------------- Timer clocks ----------------- */
 
+<<<<<<< Updated upstream
 constexpr uint32_t tim_apb1_hz(void)
+=======
+static inline uint32_t timer_kernel_hz(uint32_t pclk, uint32_t apb_div)
+{
+#if defined(RCC_CFGR_TIMPRE)
+    if ((RCC->CFGR & RCC_CFGR_TIMPRE) != 0u)
+        return (apb_div <= 4u) ? hclk_hz() : (pclk * 4u);
+#endif
+    return (apb_div == 1u) ? pclk : (pclk * 2u);
+}
+
+static inline uint32_t tim_apb1_hz(void)
+>>>>>>> Stashed changes
 {
 #if defined(RCC_D2CFGR_D2PPRE1)
     uint32_t div = decode_ppre_div((RCC->D2CFGR & RCC_D2CFGR_D2PPRE1) >> RCC_D2CFGR_D2PPRE1_Pos);
-    uint32_t p   = pclk1_hz();
-    return (div == 1u) ? p : (p * 2u);
+    return timer_kernel_hz(pclk1_hz(), div);
 #else
     return 0u;
 #endif
@@ -326,8 +363,7 @@ constexpr uint32_t tim_apb2_hz(void)
 {
 #if defined(RCC_D2CFGR_D2PPRE2)
     uint32_t div = decode_ppre_div((RCC->D2CFGR & RCC_D2CFGR_D2PPRE2) >> RCC_D2CFGR_D2PPRE2_Pos);
-    uint32_t p   = pclk2_hz();
-    return (div == 1u) ? p : (p * 2u);
+    return timer_kernel_hz(pclk2_hz(), div);
 #else
     return 0u;
 #endif
@@ -337,8 +373,7 @@ constexpr uint32_t tim_apb4_hz(void)
 {
 #if defined(RCC_D3CFGR_D3PPRE)
     uint32_t div = decode_ppre_div((RCC->D3CFGR & RCC_D3CFGR_D3PPRE) >> RCC_D3CFGR_D3PPRE_Pos);
-    uint32_t p   = pclk4_hz();
-    return (div == 1u) ? p : (p * 2u);
+    return timer_kernel_hz(pclk4_hz(), div);
 #else
     return 0u;
 #endif
@@ -348,8 +383,16 @@ constexpr uint32_t tim_apb4_hz(void)
 
 constexpr uint32_t perck_hz(void)
 {
-    /* On many H7 designs PERCK is HSI. Keep it simple & predictable. */
+#if defined(RCC_D1CCIPR_CKPERSEL)
+    /* CKPERSEL: 0=HSI, 1=CSI, 2=HSE. */
+    switch ((RCC->D1CCIPR & RCC_D1CCIPR_CKPERSEL) >> RCC_D1CCIPR_CKPERSEL_Pos) {
+        case 1u: return csi_hz();
+        case 2u: return hse_hz();
+        default: return hsi_hz();
+    }
+#else
     return hsi_hz();
+#endif
 }
 
 /* SPI123 kernel clock from RCC_D2CCIP1R.SPI123SEL */
@@ -414,6 +457,45 @@ constexpr uint32_t spi_kernel_hz(SPI_TypeDef* spi)
     if (spi == SPI6) return pclk4_hz(); /* SPI6 usually on APB4 (no SPI6SEL here) */
 #endif
     return 0u;
+}
+
+/* Named wrappers shared with the STM32F4 clock API. */
+static inline uint32_t spi1_kernel_hz(void) { return spi_kernel_hz(SPI1); }
+static inline uint32_t spi2_kernel_hz(void) { return spi_kernel_hz(SPI2); }
+static inline uint32_t spi3_kernel_hz(void) { return spi_kernel_hz(SPI3); }
+static inline uint32_t spi4_kernel_hz(void) { return spi_kernel_hz(SPI4); }
+static inline uint32_t spi5_kernel_hz(void) { return spi_kernel_hz(SPI5); }
+static inline uint32_t spi6_kernel_hz(void) { return spi_kernel_hz(SPI6); }
+
+/* Actual SPI SCK after the H7 SPI baud-rate prescaler. */
+static inline uint32_t spi_sck_hz(SPI_TypeDef* spi)
+{
+    if (!spi) return 0u;
+#if defined(SPI1_BASE)
+    if (spi == SPI1 || spi == SPI2 || spi == SPI3 ||
+        spi == SPI4 || spi == SPI5 || spi == SPI6) {
+        uint32_t mbr = (spi->CFG1 & SPI_CFG1_MBR) >> SPI_CFG1_MBR_Pos;
+        uint32_t divisor = 2u << (mbr & 0x7u); /* /2, /4, ... /256 */
+        uint32_t kernel = spi_kernel_hz(spi);
+        return (divisor == 0u) ? 0u : (kernel / divisor);
+    }
+#endif
+    return 0u;
+}
+
+/* FDCAN1/FDCAN2 share one kernel-clock selector on STM32H743. */
+static inline uint32_t fdcan_kernel_hz(void)
+{
+#if defined(RCC_D2CCIP1R_FDCANSEL)
+    switch ((RCC->D2CCIP1R & RCC_D2CCIP1R_FDCANSEL) >> RCC_D2CCIP1R_FDCANSEL_Pos) {
+        case 0u: return hse_hz();
+        case 1u: return pll1_q_hz();
+        case 2u: return pll2_q_hz();
+        default: return 0u;
+    }
+#else
+    return 0u;
+#endif
 }
 
 /* USART kernel clock selection values are the same enum for both groups. :contentReference[oaicite:4]{index=4} */
@@ -489,6 +571,16 @@ constexpr uint32_t usart_kernel_hz(USART_TypeDef* u)
     return 0u;
 }
 
+/* Named wrappers shared with the STM32F4 clock API. */
+static inline uint32_t usart1_kernel_hz(void) { return usart_kernel_hz(USART1); }
+static inline uint32_t usart2_kernel_hz(void) { return usart_kernel_hz(USART2); }
+static inline uint32_t usart3_kernel_hz(void) { return usart_kernel_hz(USART3); }
+static inline uint32_t uart4_kernel_hz(void)  { return usart_kernel_hz(UART4); }
+static inline uint32_t uart5_kernel_hz(void)  { return usart_kernel_hz(UART5); }
+static inline uint32_t usart6_kernel_hz(void) { return usart_kernel_hz(USART6); }
+static inline uint32_t uart7_kernel_hz(void)  { return usart_kernel_hz(UART7); }
+static inline uint32_t uart8_kernel_hz(void)  { return usart_kernel_hz(UART8); }
+
 /* I2C123SEL: 0=PCLK1, 1=PLL3R, 2=HSI, 3=CSI :contentReference[oaicite:5]{index=5} */
 constexpr uint32_t i2c123_kernel_hz(void)
 {
@@ -524,6 +616,12 @@ constexpr uint32_t i2c_kernel_hz(I2C_TypeDef* i)
 #endif
     return 0u;
 }
+
+/* Named wrappers shared with the STM32F4 clock API. */
+static inline uint32_t i2c1_kernel_hz(void) { return i2c_kernel_hz(I2C1); }
+static inline uint32_t i2c2_kernel_hz(void) { return i2c_kernel_hz(I2C2); }
+static inline uint32_t i2c3_kernel_hz(void) { return i2c_kernel_hz(I2C3); }
+static inline uint32_t i2c4_kernel_hz(void) { return i2c_kernel_hz(I2C4); }
 
 /* RNGSEL: HSI48 / PLL1Q / LSE / LSI :contentReference[oaicite:6]{index=6} */
 constexpr uint32_t rng_kernel_hz(void)
